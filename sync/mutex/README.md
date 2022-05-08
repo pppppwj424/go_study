@@ -44,17 +44,86 @@ func (m *Mutex) Lock() {
 * 初始化一些变量
 * 开始`for { if getLock: break; else: keep getting }`这样的获取锁过程
 
-`自旋`：在一定条件下没必要让goroutine进入沉睡，等待sema，可以一直占有cpu等待其余goroutine释放锁。
+`自旋`：在一定条件下没必要让goroutine进入沉睡，等待sema，可以一直占有cpu等待其余goroutine释放锁。饥饿模式下没必要自旋反正也拿不到锁。
 ```
-    if old&(mutexLocked|mutexStarving) == mutexLocked && runtime_canSpin(iter) {
-        if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
-            atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
-            awoke = true
-        }
-        runtime_doSpin()
-        iter++
-        old = m.state
-        continue
+if old&(mutexLocked|mutexStarving) == mutexLocked && runtime_canSpin(iter) {
+    if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
+        atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
+        awoke = true
     }
+    runtime_doSpin()
+    iter++
+    old = m.state
+    continue
+}
 ```
+* 进入自旋时顺便把woken设为1，避免唤醒其他goroutine。
+* `runtime_canSpin(iter)` 具体细节？啥时候没必要沉睡?
 
+`非自旋时`
+* step1: 检查是否starving，不获取starving的锁
+* step2：如果无法获取锁，则将等待锁的goroutine数量+1
+* step3：在`unlock`时，我们认为starving的锁存在waiter，如果该goroutine设为的starving且没有waiter，那撤回starving的操作
+* step4：设置woken状态
+* step5：如果已经带待过了，那就插入队头，反之插入队尾。等待sema，并检查是否需要设为starving
+* step6: 如果是该goroutine设置的starving则获取锁。判断是否要退出starving, 因为starving非常不效率。
+```
+new := old
+
+// step 1
+if old&mutexStarving == 0 {
+    new |= mutexLocked
+}
+
+// step2
+if old&(mutexLocked|mutexStarving) != 0 {
+    new += 1 << mutexWaiterShift
+}
+
+// step3
+if starving && old&mutexLocked != 0 {
+    new |= mutexStarving
+}
+
+// step4 
+if awoke {
+    if new&mutexWoken == 0 {
+        throw("sync: inconsistent mutex state")
+    }
+    new &^= mutexWoken
+}
+
+
+if atomic.CompareAndSwapInt32(&m.state, old, new) {
+    if old&(mutexLocked|mutexStarving) == 0 {
+        break
+    }
+    // step5
+    queueLifo := waitStartTime != 0
+    if waitStartTime == 0 {
+        waitStartTime = runtime_nanotime()
+    }
+    runtime_SemacquireMutex(&m.sema, queueLifo, 1)
+    starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
+    old = m.state
+    
+    // step6
+    if old&mutexStarving != 0 {
+        if old&(mutexLocked|mutexWoken) != 0 || old>>mutexWaiterShift == 0 {
+            throw("sync: inconsistent mutex state")
+        }
+        delta := int32(mutexLocked - 1<<mutexWaiterShift)
+        if !starving || old>>mutexWaiterShift == 1 {
+            delta -= mutexStarving
+        }
+        atomic.AddInt32(&m.state, delta)
+        break
+    }
+    awoke = true
+    iter = 0
+} else {
+    old = m.state
+}
+```
+* TODO 为什么step6中` if !starving || old>>mutexWaiterShift == 1` 中需要判断`!starving`，能进入step6不是一定`starving`了吗？
+* TODO: search some info about `sync: inconsistent mutex state`
