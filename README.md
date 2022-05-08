@@ -1,2 +1,12 @@
-# go_study
-record some notes when studying the go
+# go study
+record some notes when studying the Go
+
+## sync
+| content   | status |
+| --------- | ------ |
+| Once      | ✅     |
+| Mutex     | ❌     |
+| Pool      | ❌     |
+| RWMutex   | ❌     |
+| WaitGroup | ❌     |
+| Map       | ❌     |
