@@ -1,7 +1,7 @@
 ```
 type Mutex struct {
     state int32
-	sema  uint32
+    sema  uint32
 }
 ```
 
