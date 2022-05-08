@@ -28,13 +28,13 @@ const (
 * 如果已经被获取了, 则使用`lockSlow`去排队等待获取资源
 ```
 func (m *Mutex) Lock() {
-	if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
-		if race.Enabled {
-			race.Acquire(unsafe.Pointer(m))
-		}
-		return
-	}
-	m.lockSlow()
+    if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
+        if race.Enabled {
+            race.Acquire(unsafe.Pointer(m))
+        }
+        return
+    }
+    m.lockSlow()
 }
 ```
 
