@@ -125,7 +125,8 @@ if atomic.CompareAndSwapInt32(&m.state, old, new) {
     old = m.state
 }
 ```
-* TODO 为什么step6中` if !starving || old>>mutexWaiterShift == 1` 中需要判断`!starving`，能进入step6不是一定`starving`了吗？
+* TODO 为什么step6中` if !starving || old>>mutexWaiterShift == 1` 中需要判断`!starving`，能进入step6不是一定`starving`了吗？    
+    g1 使mutex进入 starving, g1结束后并不会恢复。只有在`(1) it is the last waiter in the queue, or (2) it waited for less than 1 ms`下才会恢复到normal。
 * TODO: search some info about `sync: inconsistent mutex state`
 
  解锁操作
@@ -180,3 +181,4 @@ new := old
 CAS(&m.state, old, new)
 // failed: roll back; succeed: keep go on;
 ```
+* starving主要是避免一个goroutine霸占一个锁，其他等待1ms后强行似的goroutine之间可以转换。
