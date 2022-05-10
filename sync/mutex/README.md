@@ -127,3 +127,56 @@ if atomic.CompareAndSwapInt32(&m.state, old, new) {
 ```
 * TODO 为什么step6中` if !starving || old>>mutexWaiterShift == 1` 中需要判断`!starving`，能进入step6不是一定`starving`了吗？
 * TODO: search some info about `sync: inconsistent mutex state`
+
+ 解锁操作
+* step1: 解锁
+* step2: 判断是否需要发送sema去唤醒goroutine (锁已经被占了，进入了starving模式，进入了唤醒模式)
+* step3: 唤醒goroutine
+* step4: (饥饿模式下)直接给waiter, waiter会设置Lock `delta := int32(mutexLocked - 1<<mutexWaiterShift)`, mutexLocked就是用来设置Locked位的。
+
+
+ `Unlock`
+ ```
+// step1 
+new := atomic.AddInt32(&m.state, -mutexLocked)
+if new != 0 {
+    m.unlockSlow(new)
+}
+ ```
+
+
+ `unlockSlow`
+ ```
+if (new+mutexLocked)&mutexLocked == 0 {
+    throw("sync: unlock of unlocked mutex")
+}
+if new&mutexStarving == 0 {
+    old := new
+    for {
+        // step2
+        if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
+            return
+        }
+        // step3
+        new = (old - 1<<mutexWaiterShift) | mutexWoken
+        if atomic.CompareAndSwapInt32(&m.state, old, new) {
+            runtime_Semrelease(&m.sema, false, 1)
+            return
+        }
+        old = m.state
+    }
+} else {
+    // step4
+    runtime_Semrelease(&m.sema, true, 1)
+}
+ ```
+
+ * 不要复制mutex, copy了state和sema值，但是没有同样的解锁等操作作用在上面了。
+ * CAS
+```
+old := m.state
+new := old
+// do sth with new
+CAS(&m.state, old, new)
+// failed: roll back; succeed: keep go on;
+```
