@@ -10,3 +10,6 @@ record some notes when studying the Go
 | RWMutex             | 🔴    |
 | WaitGroup           | 🔴    |
 | Map                 | 🔴    |
+
+## practices
+Record some exercise
